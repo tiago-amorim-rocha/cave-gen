@@ -779,8 +779,17 @@ function stepRandomWalker(state, walker) {
       }
     }
   }
-  dx = applyBoundaryForce(walker.x, width - 1, dx, rng, walkEdgeSoft, walkEdgeHard);
-  dy = applyBoundaryForce(walker.y, height - 1, dy, rng, walkEdgeSoft, walkEdgeHard);
+  // Edge repulsion: compute influences on X and Y, prefer applying to the stronger axis.
+  const infoX = boundaryInfo(walker.x, width - 1, walkEdgeSoft, walkEdgeHard);
+  const infoY = boundaryInfo(walker.y, height - 1, walkEdgeSoft, walkEdgeHard);
+  if (infoX.influence >= infoY.influence) {
+    dx = maybeApplyBoundary(dx, infoX, rng);
+    // Only enforce on Y if it's at the hard limit; otherwise avoid overly strong corner pushes.
+    if (infoY.influence >= 1) dy = maybeApplyBoundary(dy, infoY, rng);
+  } else {
+    dy = maybeApplyBoundary(dy, infoY, rng);
+    if (infoX.influence >= 1) dx = maybeApplyBoundary(dx, infoX, rng);
+  }
   walker.x = clampInt(walker.x + dx, 0, width - 1);
   walker.y = clampInt(walker.y + dy, 0, height - 1);
   walker.stepsRemaining--;
@@ -792,25 +801,30 @@ function clampStep(v) {
   return 0;
 }
 
-function applyBoundaryForce(pos, maxIndex, delta, rng, soft, hard) {
-  if (soft <= 0) return delta;
+function boundaryInfo(pos, maxIndex, soft, hard) {
+  if (soft <= 0) return { awayDir: 0, influence: 0 };
   const effectiveSoft = Math.max(soft, hard);
   const leftDist = pos;
   const rightDist = maxIndex - pos;
-  if (leftDist >= effectiveSoft && rightDist >= effectiveSoft) return delta;
-  let awayDir = 0;
-  let distance = 0;
-  if (leftDist <= rightDist) {
-    awayDir = 1;
-    distance = leftDist;
-  } else {
-    awayDir = -1;
-    distance = rightDist;
-  }
+  if (leftDist >= effectiveSoft && rightDist >= effectiveSoft) return { awayDir: 0, influence: 0 };
+  const awayDir = (leftDist <= rightDist) ? 1 : -1;
+  const distance = (leftDist <= rightDist) ? leftDist : rightDist;
   const influence = boundaryInfluence(distance, effectiveSoft, hard);
-  if (influence <= 0) return delta;
-  if (influence >= 1 || rng() < influence) {
-    return awayDir;
+  return { awayDir, influence };
+}
+
+function maybeApplyBoundary(delta, info, rng) {
+  const { awayDir, influence } = info;
+  if (influence <= 0 || awayDir === 0) return delta;
+  // If already moving inward, keep it. If moving outward, flip with P=influence.
+  if (delta === awayDir) return delta;
+  if (delta === -awayDir) {
+    if (influence >= 1 || rng() < influence) return awayDir;
+    return delta;
+  }
+  // If stationary on this axis, gently bias inward with half probability.
+  if (delta === 0) {
+    if (rng() < influence * 0.5) return awayDir;
   }
   return delta;
 }
