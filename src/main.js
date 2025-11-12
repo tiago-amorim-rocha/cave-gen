@@ -820,7 +820,8 @@ function boundaryInfluence(dist, soft, hard) {
   if (soft <= hard) return dist <= hard ? 1 : 0;
   if (dist >= soft) return 0;
   const span = Math.max(1e-6, soft - hard);
-  return 1 - (dist - hard) / span;
+  const t = (dist - hard) / span;
+  return 1 - t * t; // quadratic falloff: gentle near soft, strong near hard
 }
 
 function carveValuesDisc(values, width, height, cx, cy, radius) {
