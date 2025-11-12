@@ -808,15 +808,17 @@ function stepRandomWalker(state, walker) {
     }
   }
   // Edge repulsion: compute influences on X and Y, prefer applying to the stronger axis.
-  const infoX = boundaryInfo(walker.x, width - 1, walkEdgeSoft, walkEdgeHard);
-  const infoY = boundaryInfo(walker.y, height - 1, walkEdgeSoft, walkEdgeHard);
+  const edgePower = state.walkEdgePower || 4;
+  const edgeStrength = Math.max(0, Math.min(1, state.walkEdgeStrength || 0));
+  const infoX = boundaryInfo(walker.x, width - 1, walkEdgeSoft, walkEdgeHard, edgePower);
+  const infoY = boundaryInfo(walker.y, height - 1, walkEdgeSoft, walkEdgeHard, edgePower);
   if (infoX.influence >= infoY.influence) {
-    dx = maybeApplyBoundary(dx, infoX, rng);
+    dx = maybeApplyBoundary(dx, infoX, rng, edgeStrength);
     // Only enforce on Y if it's at the hard limit; otherwise avoid overly strong corner pushes.
-    if (infoY.influence >= 1) dy = maybeApplyBoundary(dy, infoY, rng);
+    if (infoY.influence >= 1) dy = maybeApplyBoundary(dy, infoY, rng, edgeStrength);
   } else {
-    dy = maybeApplyBoundary(dy, infoY, rng);
-    if (infoX.influence >= 1) dx = maybeApplyBoundary(dx, infoX, rng);
+    dy = maybeApplyBoundary(dy, infoY, rng, edgeStrength);
+    if (infoX.influence >= 1) dx = maybeApplyBoundary(dx, infoX, rng, edgeStrength);
   }
   walker.x = clampInt(walker.x + dx, 0, width - 1);
   walker.y = clampInt(walker.y + dy, 0, height - 1);
@@ -829,7 +831,7 @@ function clampStep(v) {
   return 0;
 }
 
-function boundaryInfo(pos, maxIndex, soft, hard) {
+function boundaryInfo(pos, maxIndex, soft, hard, power = 4) {
   if (soft <= 0) return { awayDir: 0, influence: 0 };
   const effectiveSoft = Math.max(soft, hard);
   const leftDist = pos;
@@ -837,14 +839,13 @@ function boundaryInfo(pos, maxIndex, soft, hard) {
   if (leftDist >= effectiveSoft && rightDist >= effectiveSoft) return { awayDir: 0, influence: 0 };
   const awayDir = (leftDist <= rightDist) ? 1 : -1;
   const distance = (leftDist <= rightDist) ? leftDist : rightDist;
-  const influence = boundaryInfluence(distance, effectiveSoft, hard);
+  const influence = boundaryInfluence(distance, effectiveSoft, hard, power);
   return { awayDir, influence };
 }
 
-function maybeApplyBoundary(delta, info, rng) {
+function maybeApplyBoundary(delta, info, rng, strength) {
   const { awayDir, influence } = info;
   if (influence <= 0 || awayDir === 0) return delta;
-  const strength = (state.walkEdgeStrength || 0);
   const prob = Math.max(0, Math.min(1, influence * strength));
   // If already moving inward, keep it. If moving outward, flip with P=prob.
   if (delta === awayDir) return delta;
@@ -859,13 +860,13 @@ function maybeApplyBoundary(delta, info, rng) {
   return delta;
 }
 
-function boundaryInfluence(dist, soft, hard) {
+function boundaryInfluence(dist, soft, hard, power = 4) {
   if (dist <= hard) return 1;
   if (soft <= hard) return dist <= hard ? 1 : 0;
   if (dist >= soft) return 0;
   const span = Math.max(1e-6, soft - hard);
   const t = (dist - hard) / span;
-  const p = Math.max(0.5, state.walkEdgePower || 4);
+  const p = Math.max(0.5, power);
   return 1 - Math.pow(t, p); // adjustable steepness
 }
 
