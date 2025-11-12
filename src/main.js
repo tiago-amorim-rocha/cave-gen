@@ -57,6 +57,10 @@ const ui = {
   walkCohesion: $("#walkCohesion"),
   walkEdgeSoft: $("#walkEdgeSoft"),
   walkEdgeHard: $("#walkEdgeHard"),
+  walkEdgeStrength: $("#walkEdgeStrength"),
+  walkEdgePower: $("#walkEdgePower"),
+  walkDriftAngle: $("#walkDriftAngle"),
+  walkDriftStrength: $("#walkDriftStrength"),
   walkReset: $("#walkReset"),
 };
 
@@ -287,6 +291,10 @@ function render() {
   if (walkEdgeSoft < walkEdgeHard) {
     [walkEdgeSoft, walkEdgeHard] = [walkEdgeHard, walkEdgeSoft];
   }
+  const walkEdgeStrength = clamp(parseFloat(ui.walkEdgeStrength.value || "0.25"), 0, 1);
+  const walkEdgePower = clamp(parseFloat(ui.walkEdgePower.value || "4"), 0.5, 8);
+  const walkDriftAngle = clamp(parseFloat(ui.walkDriftAngle.value || "0"), 0, 360);
+  const walkDriftStrength = clamp(parseFloat(ui.walkDriftStrength.value || "0"), 0, 1);
   const walkSpeed = clampInt(parseInt(ui.walkSpeed.value || "60", 10), 1, 60);
 
   const postSettings = { thresholdOn, thresholdCutoff, thresholdWidth, blurRadius };
@@ -310,6 +318,10 @@ function render() {
       walkEdgeSoft,
       walkEdgeHard,
       walkSpeed,
+      walkEdgeStrength,
+      walkEdgePower,
+      walkDriftAngle,
+      walkDriftStrength,
       postSettings,
     };
     if (needsRestart) {
@@ -652,7 +664,7 @@ function generateCaveLayout({
   };
 }
 
-function startRandomWalkAnimation({ width, height, seed, walkCount, walkSteps, walkRadius, walkBranch, walkBias, walkCohesion, walkEdgeSoft, walkEdgeHard, walkSpeed, postSettings }) {
+function startRandomWalkAnimation({ width, height, seed, walkCount, walkSteps, walkRadius, walkBranch, walkBias, walkCohesion, walkEdgeSoft, walkEdgeHard, walkSpeed, walkEdgeStrength, walkEdgePower, walkDriftAngle, walkDriftStrength, postSettings }) {
   cancelAnimation();
   ctx.clearRect(0, 0, width, height);
   const values = new Float32Array(width * height).fill(1);
@@ -674,6 +686,10 @@ function startRandomWalkAnimation({ width, height, seed, walkCount, walkSteps, w
     rng,
     timer: null,
     finished: false,
+    walkEdgeStrength,
+    walkEdgePower,
+    walkDriftAngle,
+    walkDriftStrength,
   };
   currentWalkState = state;
   currentPostSettings = postSettings;
@@ -749,7 +765,19 @@ function stepRandomWalker(state, walker) {
     { dx: -1, dy: 1, w: diagonalWeight },
     { dx: 1, dy: 1, w: diagonalWeight },
   ];
-  let totalWeight = horizontalWeight * 2 + verticalWeight * 2 + diagonalWeight * 4;
+  // Apply global drift tendency by up-weighting moves aligned with drift angle.
+  let totalWeight = 0;
+  const driftStrength = state.walkDriftStrength || 0;
+  const driftAngle = ((state.walkDriftAngle || 0) * Math.PI) / 180;
+  const dvx = Math.cos(driftAngle), dvy = Math.sin(driftAngle);
+  for (const m of moves) {
+    const mlen = Math.hypot(m.dx, m.dy) || 1;
+    const mdx = m.dx / mlen, mdy = m.dy / mlen;
+    const align = Math.max(0, mdx * dvx + mdy * dvy); // [0,1]
+    const factor = 1 + driftStrength * align; // up to 2x
+    m.w *= factor;
+    totalWeight += m.w;
+  }
   if (totalWeight <= 0) totalWeight = 1; // safeguard
   let pick = rng() * totalWeight;
   let dx = 0;
@@ -816,15 +844,17 @@ function boundaryInfo(pos, maxIndex, soft, hard) {
 function maybeApplyBoundary(delta, info, rng) {
   const { awayDir, influence } = info;
   if (influence <= 0 || awayDir === 0) return delta;
-  // If already moving inward, keep it. If moving outward, flip with P=influence.
+  const strength = (state.walkEdgeStrength || 0);
+  const prob = Math.max(0, Math.min(1, influence * strength));
+  // If already moving inward, keep it. If moving outward, flip with P=prob.
   if (delta === awayDir) return delta;
   if (delta === -awayDir) {
-    if (influence >= 1 || rng() < influence) return awayDir;
+    if (rng() < prob) return awayDir;
     return delta;
   }
   // If stationary on this axis, gently bias inward with half probability.
   if (delta === 0) {
-    if (rng() < influence * 0.5) return awayDir;
+    if (rng() < prob * 0.5) return awayDir;
   }
   return delta;
 }
@@ -835,7 +865,8 @@ function boundaryInfluence(dist, soft, hard) {
   if (dist >= soft) return 0;
   const span = Math.max(1e-6, soft - hard);
   const t = (dist - hard) / span;
-  return 1 - Math.pow(t, 4); // steep falloff: almost zero near soft, spikes near hard
+  const p = Math.max(0.5, state.walkEdgePower || 4);
+  return 1 - Math.pow(t, p); // adjustable steepness
 }
 
 function carveValuesDisc(values, width, height, cx, cy, radius) {
@@ -942,7 +973,8 @@ ui.algo.addEventListener("change", () => {
   ui.edgeFeather, ui.caveSmooth, ui.layoutCount, ui.layoutMinRadius,
   ui.layoutMaxRadius, ui.layoutPadding,
   ui.walkCount, ui.walkSteps, ui.walkRadius, ui.walkBranch, ui.walkSpeed,
-  ui.walkBias, ui.walkCohesion, ui.walkEdgeSoft, ui.walkEdgeHard
+  ui.walkBias, ui.walkCohesion, ui.walkEdgeSoft, ui.walkEdgeHard,
+  ui.walkEdgeStrength, ui.walkEdgePower, ui.walkDriftAngle, ui.walkDriftStrength
 ].forEach(el => el.addEventListener("change", () => {
   maybeAutoRender();
 }));
