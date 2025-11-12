@@ -821,7 +821,7 @@ function boundaryInfluence(dist, soft, hard) {
   if (dist >= soft) return 0;
   const span = Math.max(1e-6, soft - hard);
   const t = (dist - hard) / span;
-  return 1 - t * t; // quadratic falloff: gentle near soft, strong near hard
+  return 1 - Math.pow(t, 4); // steep falloff: almost zero near soft, spikes near hard
 }
 
 function carveValuesDisc(values, width, height, cx, cy, radius) {
