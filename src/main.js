@@ -38,8 +38,6 @@ const ui = {
   billowPower: $("#billowPower"),
   blurRadius: $("#blurRadius"),
   blurRadiusValue: $("#blurRadiusValue"),
-  closingRadius: $("#closingRadius"),
-  closingRadiusValue: $("#closingRadiusValue"),
   caveRadius: $("#caveRadius"),
   caveIrregularity: $("#caveIrregularity"),
   caveDetailScale: $("#caveDetailScale"),
@@ -57,6 +55,8 @@ const ui = {
   walkSpeed: $("#walkSpeed"),
   walkBias: $("#walkBias"),
   walkCohesion: $("#walkCohesion"),
+  walkEdgeSoft: $("#walkEdgeSoft"),
+  walkEdgeHard: $("#walkEdgeHard"),
   walkReset: $("#walkReset"),
 };
 
@@ -261,9 +261,8 @@ function render() {
   const caveSmooth = clampInt(parseInt(ui.caveSmooth.value || "2", 10), 0, 5);
   const thresholdOn = ui.thresholdEnabled.checked;
   const thresholdCutoff = clamp(parseFloat(ui.threshold.value || "0.5"), 0, 1);
-  const thresholdWidth = clamp(parseFloat(ui.thresholdWidth.value || "0.05"), 0, 0.5);
-  const blurRadius = clampInt(parseFloat(ui.blurRadius.value || "0"), 0, 10);
-  const closingRadius = clampInt(parseFloat(ui.closingRadius.value || "0"), 0, 5);
+  const thresholdWidth = clamp(parseFloat(ui.thresholdWidth.value || "0.05"), 0, 1);
+  const blurRadius = clampInt(parseFloat(ui.blurRadius.value || "0"), 0, 30);
   let layoutCount = clampInt(parseInt(ui.layoutCount.value || "12", 10), 1, 200);
   let layoutMinRadius = clamp(parseFloat(ui.layoutMinRadius.value || "90"), 8, 4096);
   let layoutMaxRadius = clamp(parseFloat(ui.layoutMaxRadius.value || "180"), layoutMinRadius, 4096);
@@ -275,15 +274,22 @@ function render() {
   layoutMaxRadius = Math.min(Math.max(layoutMaxRadius, layoutMinRadius), maxAllowedRadius);
   const caveRadius = Math.min(rawCaveRadius, maxAllowedRadius);
   layoutCount = Math.max(1, Math.min(layoutCount, 400));
-  const walkCount = clampInt(parseInt(ui.walkCount.value || "40", 10), 1, 500);
+  const walkCount = clampInt(parseInt(ui.walkCount.value || "20", 10), 1, 500);
   const walkSteps = clampInt(parseInt(ui.walkSteps.value || "800", 10), 10, 10000);
-  const walkRadius = clamp(parseFloat(ui.walkRadius.value || "4"), 1, 64);
+  const walkRadius = clamp(parseFloat(ui.walkRadius.value || "2"), 1, 64);
   const walkBranch = clamp(parseFloat(ui.walkBranch.value || "0.05"), 0, 1);
   const walkBias = clamp(parseFloat(ui.walkBias.value || "0.5"), 0, 1);
   const walkCohesion = clamp(parseFloat(ui.walkCohesion.value || "0"), 0, 1);
-  const walkSpeed = clampInt(parseInt(ui.walkSpeed.value || "10", 10), 1, 60);
+  const walkEdgeSoftInput = clamp(parseFloat(ui.walkEdgeSoft.value || "48"), 0, Math.max(width, height));
+  const walkEdgeHardInput = clamp(parseFloat(ui.walkEdgeHard.value || "24"), 0, Math.max(width, height));
+  let walkEdgeSoft = walkEdgeSoftInput;
+  let walkEdgeHard = walkEdgeHardInput;
+  if (walkEdgeSoft < walkEdgeHard) {
+    [walkEdgeSoft, walkEdgeHard] = [walkEdgeHard, walkEdgeSoft];
+  }
+  const walkSpeed = clampInt(parseInt(ui.walkSpeed.value || "60", 10), 1, 60);
 
-  const postSettings = { thresholdOn, thresholdCutoff, thresholdWidth, blurRadius, closingRadius };
+  const postSettings = { thresholdOn, thresholdCutoff, thresholdWidth, blurRadius };
 
   canvas.width = width;
   canvas.height = height;
@@ -301,6 +307,8 @@ function render() {
       walkBranch,
       walkBias,
       walkCohesion,
+      walkEdgeSoft,
+      walkEdgeHard,
       walkSpeed,
       postSettings,
     };
@@ -644,12 +652,14 @@ function generateCaveLayout({
   };
 }
 
-function startRandomWalkAnimation({ width, height, seed, walkCount, walkSteps, walkRadius, walkBranch, walkBias, walkCohesion, walkSpeed, postSettings }) {
+function startRandomWalkAnimation({ width, height, seed, walkCount, walkSteps, walkRadius, walkBranch, walkBias, walkCohesion, walkEdgeSoft, walkEdgeHard, walkSpeed, postSettings }) {
   cancelAnimation();
   ctx.clearRect(0, 0, width, height);
   const values = new Float32Array(width * height).fill(1);
   const rng = rngFromSeed(seed ^ 0x915f);
-  const walkers = Array.from({ length: walkCount }, () => createRandomWalker(rng, width, height, walkSteps));
+  const spawnMarginX = Math.min(Math.max(0, Math.floor(walkEdgeSoft)), Math.max(0, Math.floor(width / 2) - 1));
+  const spawnMarginY = Math.min(Math.max(0, Math.floor(walkEdgeSoft)), Math.max(0, Math.floor(height / 2) - 1));
+  const walkers = Array.from({ length: walkCount }, () => createRandomWalker(rng, width, height, walkSteps, spawnMarginX, spawnMarginY));
   const state = {
     width,
     height,
@@ -659,6 +669,8 @@ function startRandomWalkAnimation({ width, height, seed, walkCount, walkSteps, w
     walkBranch,
     walkBias,
     walkCohesion,
+    walkEdgeSoft,
+    walkEdgeHard,
     rng,
     timer: null,
     finished: false,
@@ -705,16 +717,24 @@ function startRandomWalkAnimation({ width, height, seed, walkCount, walkSteps, w
   }
 }
 
-function createRandomWalker(rng, width, height, maxSteps) {
+function createRandomWalker(rng, width, height, maxSteps, marginX = 0, marginY = 0) {
   return {
-    x: Math.floor(rng() * width),
-    y: Math.floor(rng() * height),
+    x: sampleCoord(width, marginX, rng),
+    y: sampleCoord(height, marginY, rng),
     stepsRemaining: maxSteps,
   };
 }
 
+function sampleCoord(size, margin, rng) {
+  if (size <= 1) return 0;
+  const safeMargin = Math.min(Math.max(0, Math.floor(margin)), Math.max(0, Math.floor(size / 2)));
+  const span = Math.max(1, size - safeMargin * 2);
+  const coord = Math.floor(rng() * span) + safeMargin;
+  return clampInt(coord, 0, size - 1);
+}
+
 function stepRandomWalker(state, walker) {
-  const { rng, width, height, walkRadius, values, walkBias, walkCohesion, walkers } = state;
+  const { rng, width, height, walkRadius, values, walkBias, walkCohesion, walkEdgeSoft, walkEdgeHard, walkers } = state;
   const horizontalWeight = Math.max(0, 1 - walkBias);
   const verticalWeight = Math.max(0, walkBias);
   const baseDiagonal = 0.35;
@@ -759,6 +779,8 @@ function stepRandomWalker(state, walker) {
       }
     }
   }
+  dx = applyBoundaryForce(walker.x, width - 1, dx, rng, walkEdgeSoft, walkEdgeHard);
+  dy = applyBoundaryForce(walker.y, height - 1, dy, rng, walkEdgeSoft, walkEdgeHard);
   walker.x = clampInt(walker.x + dx, 0, width - 1);
   walker.y = clampInt(walker.y + dy, 0, height - 1);
   walker.stepsRemaining--;
@@ -768,6 +790,37 @@ function clampStep(v) {
   if (v > 0) return 1;
   if (v < 0) return -1;
   return 0;
+}
+
+function applyBoundaryForce(pos, maxIndex, delta, rng, soft, hard) {
+  if (soft <= 0) return delta;
+  const effectiveSoft = Math.max(soft, hard);
+  const leftDist = pos;
+  const rightDist = maxIndex - pos;
+  if (leftDist >= effectiveSoft && rightDist >= effectiveSoft) return delta;
+  let awayDir = 0;
+  let distance = 0;
+  if (leftDist <= rightDist) {
+    awayDir = 1;
+    distance = leftDist;
+  } else {
+    awayDir = -1;
+    distance = rightDist;
+  }
+  const influence = boundaryInfluence(distance, effectiveSoft, hard);
+  if (influence <= 0) return delta;
+  if (influence >= 1 || rng() < influence) {
+    return awayDir;
+  }
+  return delta;
+}
+
+function boundaryInfluence(dist, soft, hard) {
+  if (dist <= hard) return 1;
+  if (soft <= hard) return dist <= hard ? 1 : 0;
+  if (dist >= soft) return 0;
+  const span = Math.max(1e-6, soft - hard);
+  return 1 - (dist - hard) / span;
 }
 
 function carveValuesDisc(values, width, height, cx, cy, radius) {
@@ -805,13 +858,10 @@ function renderRandomWalkFrame() {
   drawScalarField(processed, currentWalkState.width, currentWalkState.height);
 }
 
-function applyPostProcessing(values, width, height, { thresholdOn, thresholdCutoff, thresholdWidth, blurRadius, closingRadius }) {
+function applyPostProcessing(values, width, height, { thresholdOn, thresholdCutoff, thresholdWidth, blurRadius }) {
   let processed = values;
   if (blurRadius > 0) {
     processed = boxBlur(processed, width, height, blurRadius);
-  }
-  if (closingRadius > 0) {
-    processed = morphologicalClosing(processed, width, height, closingRadius);
   }
   if (thresholdOn) {
     const out = new Float32Array(processed.length);
@@ -876,7 +926,8 @@ ui.algo.addEventListener("change", () => {
   ui.caveRadius, ui.caveIrregularity, ui.caveDetailScale, ui.caveSamples,
   ui.edgeFeather, ui.caveSmooth, ui.layoutCount, ui.layoutMinRadius,
   ui.layoutMaxRadius, ui.layoutPadding,
-  ui.walkCount, ui.walkSteps, ui.walkRadius, ui.walkBranch, ui.walkSpeed
+  ui.walkCount, ui.walkSteps, ui.walkRadius, ui.walkBranch, ui.walkSpeed,
+  ui.walkBias, ui.walkCohesion, ui.walkEdgeSoft, ui.walkEdgeHard
 ].forEach(el => el.addEventListener("change", () => {
   maybeAutoRender();
 }));
@@ -884,7 +935,6 @@ const sliderBindings = [
   { input: ui.threshold, output: ui.thresholdValue, decimals: 2 },
   { input: ui.thresholdWidth, output: ui.thresholdWidthValue, decimals: 2 },
   { input: ui.blurRadius, output: ui.blurRadiusValue, decimals: 0 },
-  { input: ui.closingRadius, output: ui.closingRadiusValue, decimals: 0 },
 ];
 sliderBindings.forEach(({ input, output, decimals }) => {
   const update = () => updateSliderValue(input, output, decimals);

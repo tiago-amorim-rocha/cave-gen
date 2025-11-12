@@ -64,7 +64,7 @@
           <label class="slider">
             Soft Width
             <div class="slider-wrap">
-              <input id="thresholdWidth" type="range" min="0" max="0.5" step="0.01" value="0.05" />
+              <input id="thresholdWidth" type="range" min="0" max="1" step="0.01" value="0.05" />
               <output id="thresholdWidthValue">0.05</output>
             </div>
           </label>
@@ -190,6 +190,14 @@
             <input id="walkCohesion" type="number" min="0" max="1" step="0.05" value="0" />
           </label>
           <label data-scope="randomWalk">
+            Edge Force Start (px)
+            <input id="walkEdgeSoft" type="number" min="0" max="512" step="1" value="48" />
+          </label>
+          <label data-scope="randomWalk">
+            Edge Force Max (px)
+            <input id="walkEdgeHard" type="number" min="0" max="512" step="1" value="24" />
+          </label>
+          <label data-scope="randomWalk">
             Walk Speed (steps/sec)
             <input id="walkSpeed" type="number" min="1" max="60" step="1" value="60" />
           </label>
@@ -200,15 +208,8 @@
           <label class="slider">
             Blur Radius (px)
             <div class="slider-wrap">
-              <input id="blurRadius" type="range" min="0" max="10" step="1" value="0" />
+              <input id="blurRadius" type="range" min="0" max="30" step="1" value="0" />
               <output id="blurRadiusValue">0</output>
-            </div>
-          </label>
-          <label class="slider">
-            Closing Radius (px)
-            <div class="slider-wrap">
-              <input id="closingRadius" type="range" min="0" max="5" step="1" value="0" />
-              <output id="closingRadiusValue">0</output>
             </div>
           </label>
         </div>
