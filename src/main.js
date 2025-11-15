@@ -1021,6 +1021,20 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); render(); }
 });
 
+// Load and display version info
+fetch('/version.json')
+  .then(res => res.json())
+  .then(version => {
+    console.log('%c🏔️ Cave Gen', 'font-size: 16px; font-weight: bold; color: #4f46e5;');
+    console.log(`Version: ${version.gitHash}`);
+    console.log(`Build: ${version.buildId}`);
+    console.log(`Date: ${new Date(version.timestamp).toLocaleString()}`);
+    console.log(`Commit: ${version.commitMessage}`);
+  })
+  .catch(err => {
+    console.log('Version info not available (running in dev?)');
+  });
+
 // Render on load
 updateControlVisibility(ui.algo.value);
 render();
